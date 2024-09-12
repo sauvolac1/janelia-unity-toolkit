@@ -47,53 +47,6 @@ namespace Janelia
         public float memoryOfSlip; //keeps track of all the slips
 
 
-        private SocketMessageReader _socketMessageReader;
-        private FicTracSpinThresholder _thresholder;
-        private FicTracAverager _averager;
-
-        private float _dCorrectionBase;
-        private float _dCorrection;
-        private float _dCorrectionLatest;
-
-        private int _framesSinceLogWrite = 0;
-
-        private SocketMessageReader.Delimiter HEADER = SocketMessageReader.Header((Byte)'F');
-        private const Byte SEPARATOR = (Byte)',';
-
-        [Serializable]
-        private class FicTracParametersLog : Logger.Entry
-        {
-            public string ficTracServerAddress;
-            public int ficTracServerPort;
-            public float ficTracBallRadius;
-        };
-        private FicTracParametersLog _currentFicTracParametersLog = new FicTracParametersLog();
-
-        [Serializable]
-        private class FicTracMessageLog : Logger.Entry
-        {
-            public long ficTracTimestampWriteMs;
-            public long ficTracTimestampReadMs;
-            public Vector3 ficTracDeltaRotationVectorLab;
-            public float ficTracIntegratedAnimalHeadingLab;
-        };
-        private FicTracMessageLog _currentFicTracMessageLog = new FicTracMessageLog();
-
-        [Serializable]
-        internal class Transformation : Logger.Entry
-        {
-            public Vector3 worldPosition;
-            public Vector3 worldRotationDegs;
-        };
-        private Transformation _currentTransformation = new Transformation();
-
-        [Serializable]
-        internal class Correction : Logger.Entry
-        {
-            public float headingCorrectionDegs;
-        };
-        private Correction _currentCorrection = new Correction();
-
         public void Start()
         {
             _currentFicTracParametersLog.ficTracServerAddress = ficTracServerAddress;
