@@ -35,16 +35,16 @@ namespace Janelia
         public int logWriteIntervalFrames = 100;
         public bool logFicTracMessages = false;
 
-        public float slipHeading = 0;
+        private float slipHeading = 0;
         private float elapsedTime = 0f;  // Timer for the primary block
         private float secondaryElapsedTime = 0f;  // Timer for the secondary block
-        private float runDuration = 28f;  // Duration for the primary block (28 seconds)
-        private float secondaryDuration = 2f;  // Duration for the secondary block (2 seconds)
+        public float primaryDuration = 28f;  // Duration for the primary block (28 seconds)
+        public float secondaryDuration = 2f;  // Duration for the secondary block (2 seconds)
         private bool inSecondaryBlock = false;  // Flag to track if we are in the secondary block
         private float degpersec = 50;  // Degrees per second open loop rotation
         private float direction = 1; //direction of rotation 
-        public float headingUnityDeg;
-        public float memoryOfSlip; //keeps track of all the slips
+        private float headingUnityDeg;
+        private float memoryOfSlip; //keeps track of all the slips
 
 
         public void Start()
@@ -79,7 +79,7 @@ namespace Janelia
                 // Increment the primary block timer
                 elapsedTime += Time.deltaTime;
 
-                if (elapsedTime > runDuration)
+                if (elapsedTime > primaryDuration)
                 {
                     // Enter the secondary block
                     inSecondaryBlock = true;

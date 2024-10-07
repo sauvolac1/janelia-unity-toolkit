@@ -136,7 +136,6 @@ namespace Janelia
                 }
 
                 SaveUpdateForPacking();
-                SaveUpdateForPacking();
             }
         }
 
@@ -391,7 +390,7 @@ namespace Janelia
         {
             if (DoPackFrames())
             {
-                float[] ts = new float[]{ packingFraction1, packingFraction2, packingFraction3 };
+                float[] ts = new float[] { packingFraction1, packingFraction2, packingFraction3 };
 
                 // Do NUM_FRAMES_TO_PACK - 1, as _packingSubject will be the last one,
                 // with the pose of the current frame.
@@ -521,6 +520,7 @@ namespace Janelia
                 }
                 else
                 {
+                    // TODO: Would it be faster to use Blit(Texture source, RenderTexture dest, Vector2 scale, Vector2 offset, ...)?
                     Graphics.DrawTexture(new Rect(x, 0, w, displayHeight), displayCameras[i].targetTexture);
                 }
             }
@@ -558,7 +558,7 @@ namespace Janelia
                 {
                     bool even = (Time.frameCount % 2 == 0);
                     Texture2D progressTexR = even ? _progressTextureEven : _progressTextureOdd;
-                    Texture2D progressTexG = even ? _progressTextureOdd  : _progressTextureEven;
+                    Texture2D progressTexG = even ? _progressTextureOdd : _progressTextureEven;
                     Texture2D progressTexB = even ? _progressTextureEven : _progressTextureOdd;
                     _packingMaterial.SetTexture("_TexR", progressTexR);
                     _packingMaterial.SetTexture("_TexG", progressTexG);
