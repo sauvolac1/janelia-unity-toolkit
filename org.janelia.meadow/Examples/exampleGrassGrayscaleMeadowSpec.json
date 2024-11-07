@@ -1,8 +1,8 @@
 {
-  "xWidth10cm": 40.0,
-  "zWidth10cm": 40.0,
-  "xNumClutterCells": 60,
-  "zNumClutterCells": 60,
+  "xWidth10cm": 80.0,
+  "zWidth10cm": 80.0,
+  "xNumClutterCells": 120,
+  "zNumClutterCells": 120,
   "clutterJitterFraction": 0.35,
   "clutterItems": [
     {
@@ -33,7 +33,7 @@
             "minScreenHeight": 0.01
         }
       ],
-      "probability": 0.1
+      "probability": 0.35
     }
   ],
   "groundColor": "#080808",

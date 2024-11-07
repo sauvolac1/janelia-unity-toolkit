@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using static Janelia.FicTracSubjectIntegrated;
 
 // An application using a `Janelia.KinematicSubjectIntegrated` can play back the motion
 // captured in the log of a previous session.  See `PlaybackHandler.cs` in org.janelia.collison-handling.
@@ -21,13 +22,19 @@ namespace Janelia
     [RequireComponent(typeof(FicTracSpinThresholder))]
     // For recording and storing the moving average (in a window of frames) for the heading angle.
     [RequireComponent(typeof(FicTracAverager))]
-    public class FicTracSubjectIntegrated : MonoBehaviour
+
+    public class FicTracSubjectSlip : MonoBehaviour
     {
+
+        // For detecting periods of free spinning from FicTrac, when the heading changes
+        // with an angular speed above a threshold.
+        public FicTracSpinThresholder thresholder;
         public string ficTracServerAddress = "127.0.0.1";
         public int ficTracServerPort = 2000;
         public float ficTracBallRadius = 0.5f;
         public float translationalGain = 4;
-		// The size in bytes of one item in the buffer of FicTrac messages.
+        public int smoothingCount = 3;
+        // The size in bytes of one item in the buffer of FicTrac messages.
         public int ficTracBufferSize = 1024;
         // The number of items in the buffer of FicTrac messages.
         public int ficTracBufferCount = 240;
@@ -71,6 +78,8 @@ namespace Janelia
 
         public void Update()
         {
+            _deltaRotationVectorLabUpdated = Vector3.zero;
+
             if (_playbackHandler.Update(ref _currentTransformation, transform))
             {
                 return;
@@ -110,65 +119,42 @@ namespace Janelia
                         if (!valid)
                             break;
 
-                        int i17 = 0, len17 = 0;
-                        IoUtilities.NthSplit(dataFromSocket, SEPARATOR, i0, 17, ref i17, ref len17);
-                        float d = (float)IoUtilities.ParseDouble(dataFromSocket, i17, len17, ref valid);
-                        float headingFictracRad = d;
-                        float headingFictracDeg = headingFictracRad * Mathf.Rad2Deg;
-                        headingUnityDeg = headingFictracDeg + memoryOfSlip;
-                        float headingUnityRad = headingUnityDeg * Mathf.Deg2Rad;
+                        int i8 = 0, len8 = 0;
+                        IoUtilities.NthSplit(dataFromSocket, SEPARATOR, i0, 8, ref i8, ref len8);
+                        float c = (float)IoUtilities.ParseDouble(dataFromSocket, i8, len8, ref valid);
                         if (!valid)
                             break;
 
-                        float headingRaw = headingUnityDeg;
-                        _thresholder.UpdateAbsolute(headingRaw, Time.deltaTime);
-                        if (_thresholder.angularSpeed < _thresholder.threshold)
+                        float s = Mathf.Rad2Deg;
+                        float heading = c * s;
+                        thresholder.UpdateRelative(heading, Time.deltaTime);
+                        if (thresholder.angularSpeed < thresholder.threshold)
                         {
-                            _dCorrection = _dCorrection + _dCorrectionLatest;
-                            float dCorrected = headingUnityRad - _dCorrection;
-
-                            _dCorrectionBase = dCorrected;
-                            _dCorrectionLatest = 0;
-
-                            float forward = b * ficTracBallRadius * translationalGain;
-                            float sideways = a * ficTracBallRadius * translationalGain;
-                            Vector3 translation = new Vector3(forward, 0, sideways);
-
-                            float heading = dCorrected * Mathf.Rad2Deg;
-                            Vector3 eulerAngles = transform.eulerAngles;
-                            eulerAngles.y = heading;
-
-                            transform.Translate(translation);
-                            transform.eulerAngles = eulerAngles;
+                            _deltaRotationVectorLabToSmooth.Set(a, b, c);
+                            Smooth();
+                            _deltaRotationVectorLabUpdated += _deltaRotationVectorLabToSmooth;
                         }
                         else
                         {
-                            _thresholder.Log();
-                            _dCorrectionLatest = d - _dCorrection - _dCorrectionBase;
-
-                            _currentCorrection.headingCorrectionDegs = (_dCorrection + _dCorrectionLatest) * Mathf.Rad2Deg;
-                            Logger.Log(_currentCorrection);
+                            thresholder.Log();
                         }
 
                         if (logFicTracMessages)
                         {
-                            int i8 = 0, len8 = 0;
-                            IoUtilities.NthSplit(dataFromSocket, SEPARATOR, i0, 8, ref i8, ref len8);
-                            float c = (float)IoUtilities.ParseDouble(dataFromSocket, i8, len8, ref valid);
-                            if (!valid)
-                                break;
-
                             int i22 = 0, len22 = 0;
                             IoUtilities.NthSplit(dataFromSocket, SEPARATOR, i0, 22, ref i22, ref len22);
-                            long timestampWriteMs = IoUtilities.ParseLong(dataFromSocket, i22, len22, ref valid);
+                            long timestampWrite = IoUtilities.ParseLong(dataFromSocket, i22, len22, ref valid);
                             if (!valid)
                                 break;
 
-                            _currentFicTracMessageLog.ficTracTimestampWriteMs = timestampWriteMs;
+                            _currentFicTracMessageLog.ficTracTimestampWriteMs = timestampWrite;
                             _currentFicTracMessageLog.ficTracTimestampReadMs = timestampReadMs;
-                            _currentFicTracMessageLog.ficTracDeltaRotationVectorLab = new Vector3(a, b, c);
-                            _currentFicTracMessageLog.ficTracIntegratedAnimalHeadingLab = d;
+                            _currentFicTracMessageLog.ficTracDeltaRotationVectorLab.Set(a, b, c);
                             Logger.Log(_currentFicTracMessageLog);
+
+                            _deltaRotationVectorLabUpdated[0] = a;
+                            _deltaRotationVectorLabUpdated[1] = b;
+                            _deltaRotationVectorLabUpdated[2] = c;
                         }
                     }
 
@@ -190,7 +176,6 @@ namespace Janelia
             {
                 // Increment the secondary timer
                 secondaryElapsedTime += Time.deltaTime;
-                LogUtilities.LogDeltaTime();
 
                 // Check if the secondary block has finished
                 if (secondaryElapsedTime > secondaryDuration)
@@ -209,6 +194,36 @@ namespace Janelia
             }
 
         }
+
+        public Vector3? Translation()
+        {
+            float s = ficTracBallRadius;
+            float g = translationalGain;
+            float forward = _deltaRotationVectorLabUpdated[1] * s * g;
+            float sideways = _deltaRotationVectorLabUpdated[0] * s * g;
+            return new Vector3(forward, 0, sideways);
+        }
+
+        public Vector3? RotationDegrees()
+        {
+            float s = Mathf.Rad2Deg;
+            float heading = _deltaRotationVectorLabUpdated[2] * s;
+            return new Vector3(0, -heading, 0);
+        }
+        private void Smooth()
+        {
+            _dataForSmoothing[_dataForSmoothingOldestIndex] = _deltaRotationVectorLabToSmooth;
+            _dataForSmoothingOldestIndex = (_dataForSmoothingOldestIndex + 1) % smoothingCount;
+
+            _deltaRotationVectorLabToSmooth = Vector3.zero;
+            foreach (Vector3 value in _dataForSmoothing)
+            {
+                _deltaRotationVectorLabToSmooth += value;
+            }
+            _deltaRotationVectorLabToSmooth /= smoothingCount;
+        }
+
+        private Vector3 _deltaRotationVectorLabUpdated = new Vector3();
 
         public void PerformSecondaryFunctions()
         {   
@@ -376,6 +391,9 @@ namespace Janelia
         };
         private Attempt _currentAttempt = new Attempt();
 
+        private Vector3[] _dataForSmoothing;
+        private int _dataForSmoothingOldestIndex = 0;
+        private Vector3 _deltaRotationVectorLabToSmooth = new Vector3();
 
         private FicTracAverager _averager;
 
