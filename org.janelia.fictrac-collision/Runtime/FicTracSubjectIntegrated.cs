@@ -1,5 +1,7 @@
+//using GluonGui.WorkspaceWindow.Views.WorkspaceExplorer;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Eventing.Reader;
 using UnityEngine;
 
 // An application using a `Janelia.KinematicSubjectIntegrated` can play back the motion
@@ -19,15 +21,17 @@ namespace Janelia
     // For detecting periods of free spinning of the FicTrac trackball (when the fly has lifted its legs
     // off the trackball), indicated by heading changes with an angular speed above a threshold.
     [RequireComponent(typeof(FicTracSpinThresholder))]
+
     // For recording and storing the moving average (in a window of frames) for the heading angle.
     [RequireComponent(typeof(FicTracAverager))]
+
     public class FicTracSubjectIntegrated : MonoBehaviour
     {
         public string ficTracServerAddress = "127.0.0.1";
         public int ficTracServerPort = 2000;
         public float ficTracBallRadius = 0.5f;
-        public float translationalGain = 4;
-		// The size in bytes of one item in the buffer of FicTrac messages.
+        public float translationalGain = 1;
+        // The size in bytes of one item in the buffer of FicTrac messages.
         public int ficTracBufferSize = 1024;
         // The number of items in the buffer of FicTrac messages.
         public int ficTracBufferCount = 240;
@@ -39,13 +43,35 @@ namespace Janelia
         private float slipHeading = 0;
         private float elapsedTime = 0f;  // Timer for the primary block
         private float secondaryElapsedTime = 0f;  // Timer for the secondary block
-        public float primaryDuration = 2f;  // Duration for the primary block (28 seconds)
-        public float secondaryDuration = 15f;  // Duration for the secondary block (2 seconds)
+        public float primaryDuration = 28f;  // Duration for the primary block (28 seconds)
+        public float secondaryDuration = 2f;  // Duration for the secondary block (2 seconds)
         private bool inSecondaryBlock = false;  // Flag to track if we are in the secondary block
-        private float degpersec = 50;  // Degrees per second open loop rotation
+        public bool openLoopOnly = false;
         private float direction = 1; //direction of rotation 
         private float headingUnityDeg;
         private float memoryOfSlip; //keeps track of all the slips
+        private bool firstFrame = true;
+        private float headingRawlast = 0;
+        private float dx = 0;
+        private float dz = 0;
+        public float translationLimit = 20; //translation distance that triggers teleportation back to start
+        public bool closedRotDuringSlip = true;
+        public bool closedTransDuringSlip = false;
+        private float rotMultiplier = 0;
+        private float transMultiplier = 0;
+        public float degpersec = 50;  // Degrees per second open loop rotation
+        public float cmpersec = 15; //Cm per second of translational slip
+        private float dmpersec => cmpersec / 10;
+       /* private List<float> translationSlips = new List<float> {(float)(Math.PI * 0.75), (float)(Math.PI * 1.0), (float)(Math.PI * 1.75),
+                (float)(Math.PI * 0.5), (float)(Math.PI * 2.0), (float)(Math.PI * 0.25),
+                (float)(Math.PI * 1.5), (float)(Math.PI * 1.25)};*/
+        private List<float> translationSlips = new List<float> {(float)(Math.PI * 1.0), (float)(Math.PI * 1.0)};
+        private float theta = 0;
+        private float instantaneousTheta = 0;
+        private int directionIndex = 0;
+        public float flyHeight = 0.01f;
+        public bool egocentricTranslationalSlip = true;
+        private float switcher = 0;
 
 
         public void Start()
@@ -59,14 +85,20 @@ namespace Janelia
             _socketMessageReader = new SocketMessageReader(HEADER, ficTracServerAddress, ficTracServerPort,
                                                            ficTracBufferSize, ficTracBufferCount);
             _socketMessageReader.Start();
-			// For detecting periods of free spinning from FicTrac, when the heading changes
-            // with an angular speed above a threshold.
-            _thresholder = gameObject.GetComponentInChildren<FicTracSpinThresholder>();
-            _dCorrection = _dCorrectionLatest = _dCorrectionBase = 0;
-
-            _averager = gameObject.GetComponentInChildren<FicTracAverager>();
 
             _playbackHandler.ConfigurePlayback();
+            LogUtilities.LogAllMeshes();
+
+            if (closedRotDuringSlip)
+            {
+                rotMultiplier = 1;
+            }
+
+            if (closedTransDuringSlip)
+            {
+                transMultiplier = 1;
+            }
+
         }
 
         public void Update()
@@ -76,7 +108,7 @@ namespace Janelia
                 return;
             }
 
-            if (!inSecondaryBlock)
+            if (!inSecondaryBlock && !openLoopOnly)
             {
                 // Increment the primary block timer
                 elapsedTime += Time.deltaTime;
@@ -85,6 +117,7 @@ namespace Janelia
                 {
                     // Enter the secondary block
                     inSecondaryBlock = true;
+                    LogUtilities.LogDeltaTime();
                 }
                 else
                 {
@@ -116,39 +149,30 @@ namespace Janelia
                         float headingFictracRad = d;
                         float headingFictracDeg = headingFictracRad * Mathf.Rad2Deg;
                         headingUnityDeg = headingFictracDeg + memoryOfSlip;
-                        float headingUnityRad = headingUnityDeg * Mathf.Deg2Rad;
                         if (!valid)
                             break;
 
-                        float headingRaw = headingUnityDeg;
-                        _thresholder.UpdateAbsolute(headingRaw, Time.deltaTime);
-                        if (_thresholder.angularSpeed < _thresholder.threshold)
+                        float forward = b * ficTracBallRadius * translationalGain;
+                        float sideways = a * ficTracBallRadius * translationalGain;
+                        Vector3 translation = new Vector3(forward, 0, sideways);
+
+                        Vector3 eulerAngles = transform.eulerAngles;
+                        eulerAngles.y = headingUnityDeg;
+
+                        if (IsAnyComponentGreaterOrEqual(transform.position, translationLimit))
                         {
-                            _dCorrection = _dCorrection + _dCorrectionLatest;
-                            float dCorrected = headingUnityRad - _dCorrection;
-
-                            _dCorrectionBase = dCorrected;
-                            _dCorrectionLatest = 0;
-
-                            float forward = b * ficTracBallRadius * translationalGain;
-                            float sideways = a * ficTracBallRadius * translationalGain;
-                            Vector3 translation = new Vector3(forward, 0, sideways);
-
-                            float heading = dCorrected * Mathf.Rad2Deg;
-                            Vector3 eulerAngles = transform.eulerAngles;
-                            eulerAngles.y = heading;
-
-                            transform.Translate(translation);
-                            transform.eulerAngles = eulerAngles;
+                            transform.position = new Vector3(0, flyHeight, 0);
                         }
                         else
                         {
-                            _thresholder.Log();
-                            _dCorrectionLatest = d - _dCorrection - _dCorrectionBase;
-
-                            _currentCorrection.headingCorrectionDegs = (_dCorrection + _dCorrectionLatest) * Mathf.Rad2Deg;
-                            Logger.Log(_currentCorrection);
+                            transform.Translate(translation);
                         }
+
+                        transform.eulerAngles = eulerAngles;
+
+                        firstFrame = true;
+
+
 
                         if (logFicTracMessages)
                         {
@@ -172,11 +196,10 @@ namespace Janelia
                         }
                     }
 
+
                     _currentTransformation.worldPosition = transform.position;
                     _currentTransformation.worldRotationDegs = transform.eulerAngles;
                     Logger.Log(_currentTransformation);
-
-                    _averager.RecordHeading(transform.eulerAngles.y);
 
                     _framesSinceLogWrite++;
                     if (_framesSinceLogWrite > logWriteIntervalFrames)
@@ -190,20 +213,21 @@ namespace Janelia
             {
                 // Increment the secondary timer
                 secondaryElapsedTime += Time.deltaTime;
-                LogUtilities.LogDeltaTime();
 
                 // Check if the secondary block has finished
                 if (secondaryElapsedTime > secondaryDuration)
                 {
                     // Reset the secondary block flag and timers
-                    direction = direction*(-1);
+                    direction = direction * (-1);
                     inSecondaryBlock = false;
                     secondaryElapsedTime = 0f;
                     elapsedTime = 0f;
+                    LogUtilities.LogDeltaTime();
+                    directionIndex = (directionIndex + 1) % translationSlips.Count;
                 }
                 else
-                {   
-                   PerformSecondaryFunctions();
+                {
+                    PerformSecondaryFunctions();
                 }
 
             }
@@ -211,7 +235,7 @@ namespace Janelia
         }
 
         public void PerformSecondaryFunctions()
-        {   
+        {
             // Execute the code for the secondary block here
             // This could be logging, resetting variables, or other operations
             // Original Update method logic
@@ -220,6 +244,13 @@ namespace Janelia
             Byte[] dataFromSocket = null;
             long timestampReadMs = 0;
             int i0 = -1;
+
+            if (firstFrame == true)
+            {
+                headingRawlast = headingUnityDeg - memoryOfSlip;
+                firstFrame = false;
+            }
+
             while (_socketMessageReader.GetNextMessage(ref dataFromSocket, ref timestampReadMs, ref i0))
             {
                 bool valid = true;
@@ -242,20 +273,51 @@ namespace Janelia
                 if (!valid)
                     break;
 
-                float headingRaw = d * Mathf.Rad2Deg;
-                _thresholder.UpdateAbsolute(headingRaw, Time.deltaTime);
+                float headingRaw = (d * Mathf.Rad2Deg);
 
-                float forward = 0;
-                float sideways = 0;
-                Vector3 translation = new Vector3(forward, 0, sideways);
-
-                slipHeading = headingUnityDeg + direction*(degpersec*secondaryElapsedTime);
+                slipHeading = headingUnityDeg + direction * (degpersec * secondaryElapsedTime) + (rotMultiplier * (headingRaw - headingRawlast));
                 Vector3 eulerAngles = transform.eulerAngles;
                 eulerAngles.y = slipHeading;
 
-                memoryOfSlip = slipHeading - d*Mathf.Rad2Deg;
+                memoryOfSlip = slipHeading - headingRaw;
 
-                transform.Translate(translation);
+                switcher = secondaryDuration / 3;
+                if (secondaryElapsedTime <= switcher || secondaryElapsedTime >= 2*switcher)
+                {
+                    theta = 0;
+                }
+                else
+                {
+                    theta = translationSlips[directionIndex];
+                }
+
+                if (egocentricTranslationalSlip)
+                {
+                    instantaneousTheta = theta;
+                }
+                else
+                {
+                    instantaneousTheta = (Mathf.Deg2Rad * slipHeading) + theta;
+                }
+
+
+                dx = dmpersec * (float)Math.Cos(instantaneousTheta);
+                dz = dmpersec * (float)Math.Sin(instantaneousTheta);
+
+
+                float forward = (b * ficTracBallRadius * translationalGain * transMultiplier) + (dx * Time.deltaTime * translationalGain);
+                float sideways = (a * ficTracBallRadius * translationalGain * transMultiplier) - (dz * Time.deltaTime * translationalGain);
+                Vector3 translation = new Vector3(forward, 0, sideways);
+
+
+                if (IsAnyComponentGreaterOrEqual(transform.position, translationLimit))
+                {
+                    transform.position = new Vector3(0, flyHeight, 0);
+                }
+                else
+                {
+                    transform.Translate(translation);
+                }
                 transform.eulerAngles = eulerAngles;
 
                 _currentAttempt.fictracAttempt = new Vector3(a, b, d);
@@ -285,10 +347,7 @@ namespace Janelia
             _currentTransformation.worldPosition = transform.position;
             _currentTransformation.worldRotationDegs = transform.eulerAngles;
             Logger.Log(_currentTransformation);
-            
             Logger.Log(_currentAttempt);
-
-            _averager.RecordHeading(transform.eulerAngles.y);
 
             _framesSinceLogWrite++;
             if (_framesSinceLogWrite > logWriteIntervalFrames)
@@ -303,6 +362,10 @@ namespace Janelia
             _socketMessageReader.OnDisable();
         }
 
+        bool IsAnyComponentGreaterOrEqual(Vector3 vector, float threshold)
+        {
+            return (Mathf.Abs(vector.x) >= threshold) || (Mathf.Abs(vector.y) >= threshold) || (Mathf.Abs(vector.z) >= threshold);
+        }
         public static float Mod360(float value)
         {
             float result = value % 360;
@@ -313,17 +376,9 @@ namespace Janelia
             return result;
         }
 
-        private void RecordHeading(float heading)
-        {
-            FicTracAverager averager = GetComponent<FicTracAverager>();
-            if (averager != null)
-            {
-                averager.RecordHeading(heading);
-            }
-        }
 
         private SocketMessageReader.Delimiter HEADER = SocketMessageReader.Header((Byte)'F');
-        private const Byte SEPARATOR = (Byte)',';    
+        private const Byte SEPARATOR = (Byte)',';
         SocketMessageReader _socketMessageReader;
 
         // To make `Janelia.Logger.Log<T>()`'s call to JsonUtility.ToJson() work correctly,
@@ -356,18 +411,6 @@ namespace Janelia
         };
         private Transformation _currentTransformation = new Transformation();
 
-        private FicTracSpinThresholder _thresholder;
-
-        private float _dCorrectionBase;
-        private float _dCorrection;
-        private float _dCorrectionLatest;
-
-        [Serializable]
-        internal class Correction : Logger.Entry
-        {
-            public float headingCorrectionDegs;
-        };
-        private Correction _currentCorrection = new Correction();
 
         [Serializable]
         internal class Attempt : Logger.Entry
@@ -375,9 +418,6 @@ namespace Janelia
             public Vector3 fictracAttempt;
         };
         private Attempt _currentAttempt = new Attempt();
-
-
-        private FicTracAverager _averager;
 
         private int _framesSinceLogWrite = 0;
 

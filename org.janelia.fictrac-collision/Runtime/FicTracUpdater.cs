@@ -44,6 +44,7 @@ namespace Janelia
             _socketMessageReader = new SocketMessageReader(HEADER, ficTracServerAddress, ficTracServerPort,
                                                            ficTracBufferSize, ficTracBufferCount);
             _socketMessageReader.Start();
+
         }
 
         public void Update()

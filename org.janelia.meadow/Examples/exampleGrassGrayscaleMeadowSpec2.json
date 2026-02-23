@@ -1,8 +1,8 @@
 {
-  "xWidth10cm": 100.0,
-  "zWidth10cm": 100.0,
-  "xNumClutterCells": 125,
-  "zNumClutterCells": 125,
+  "xWidth10cm": 6.0,
+  "zWidth10cm": 6.0,
+  "xNumClutterCells": 4,
+  "zNumClutterCells": 4,
   "clutterJitterFraction": 0.35,
   "clutterItems": [
     {

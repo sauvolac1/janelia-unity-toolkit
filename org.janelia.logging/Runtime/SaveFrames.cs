@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -19,7 +20,7 @@ namespace Janelia
     {
         public static void SetFrame(int frame)
         {
-            _frame = frame.ToString("D5");
+            _frame = frame;
         }
 
         [RuntimeInitializeOnLoadMethod]
@@ -95,7 +96,7 @@ namespace Janelia
         private static string _outputPath;
         private static string _format = "";
         private static GameObject _object;
-        internal static string _frame = "";
+        internal static int _frame = 0;
 
         // The class with the coroutine that will wait until the end of each frame, grab the pixels,
         // and save them.
@@ -129,7 +130,7 @@ namespace Janelia
             public void OnDisable()
             {
                 if (_capturing)
-                { 
+                {
                     float elapsedMsAvg = (float)_elapsedMsSum / _elapsedMsCount;
                     Debug.Log("SaveFrames: average time to save a frame: " + elapsedMsAvg + " ms");
                 }
@@ -140,7 +141,7 @@ namespace Janelia
             {
                 if (_textWidget != null)
                 {
-                    _textWidget.text = _frame;
+                    _textWidget.text = _frame.ToString("D5");
                 }
             }
 
@@ -150,7 +151,7 @@ namespace Janelia
                 // the name to use when loading is just `Flip`.
                 Shader flipShader = Resources.Load("Flip", typeof(Shader)) as Shader;
                 Material flipMaterial = new Material(flipShader);
-                
+
                 int width = Screen.width;
                 int height = Screen.height;
                 if (_downsampleHeight > 0)
@@ -164,7 +165,7 @@ namespace Janelia
                 while (_capturing)
                 {
                     yield return new WaitForEndOfFrame();
-                    if ((_frame.Length > 0) && (i % _savingPeriod == 0))
+                    if ((_frame > 0) && (i % _savingPeriod == 0))
                     {
                         long t1 = DateTimeOffset.Now.ToUnixTimeMilliseconds();
 
@@ -176,6 +177,7 @@ namespace Janelia
                         _renderTexture = RenderTexture.GetTemporary(width, height, 24, RenderTextureFormat.BGRA32);
 
                         // Using `ScreenCapture` and `AsyncGPUReadback` is considerably faster than `Texture2D.ReadPixels()`.
+                        _capturedFrames.Enqueue(_frame);
                         ScreenCapture.CaptureScreenshotIntoRenderTexture(renderTextureNeedsFlipping);
                         Graphics.Blit(renderTextureNeedsFlipping, _renderTexture, flipMaterial, 0);
                         RenderTexture.ReleaseTemporary(renderTextureNeedsFlipping);
@@ -279,6 +281,8 @@ namespace Janelia
 
             private void SaveAsFormat(byte[] imageBytes, UnityEngine.Experimental.Rendering.GraphicsFormat graphicsFormat, uint width, uint height)
             {
+                int frameBeingSaved = (_capturedFrames.Count > 0) ? _capturedFrames.Dequeue() : 0;
+
                 if ((_format.ToLower() == "graytxt") || (_format.ToLower() == "greytxt"))
                 {
                     StringBuilder sb = new StringBuilder();
@@ -288,21 +292,21 @@ namespace Janelia
                         string s = ((i + 4) % (width * 4) != 0) ? " " : "\n";
                         sb.Append(s);
                     }
-                    string filename = _frame + ".txt";
+                    string filename = frameBeingSaved.ToString("D5") + ".txt";
                     string pathname = _outputPath + "/" + filename;
                     File.WriteAllText(pathname, sb.ToString());
                 }
                 else if ((_format.ToLower() == "graybin") || (_format.ToLower() == "greybin"))
                 {
                     byte[] everyFourthByte = Enumerable.Range(0, imageBytes.Length / 4).Select(i => imageBytes[i * 4]).ToArray();
-                    string filename = _frame + ".bin";
+                    string filename = frameBeingSaved.ToString("D5") + ".bin";
                     string pathname = _outputPath + "/" + filename;
                     File.WriteAllBytes(pathname, everyFourthByte);
                 }
                 else
                 {
                     byte[] pngBytes = ImageConversion.EncodeArrayToPNG(imageBytes, graphicsFormat, width, height);
-                    string filename = _frame + ".png";
+                    string filename = frameBeingSaved.ToString("D5") + ".png";
                     string pathname = _outputPath + "/" + filename;
                     File.WriteAllBytes(pathname, pngBytes);
                 }
@@ -311,6 +315,8 @@ namespace Janelia
             private bool _capturing = false;
             private Text _textWidget = null;
             private RenderTexture _renderTexture;
+
+            Queue<int> _capturedFrames = new Queue<int>();
 
             private long _elapsedMsSum = 0;
             private long _elapsedMsCount = 0;
