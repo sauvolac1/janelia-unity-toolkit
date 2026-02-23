@@ -110,38 +110,41 @@ namespace Janelia
         {
             if (_playbackHandler.Update(ref _currentTransformation, transform))
             {
-                // During playback, still consume and log FicTrac socket messages so
-                // the buffer does not back up and so messages are captured in the log.
+                // During playback, still consume FicTrac socket messages so the buffer
+                // does not back up.  Log the FicTrac attempted movements alongside the
+                // replayed world position that is actually shown to the player.
                 Byte[] dataFromSocket = null;
                 long timestampReadMs = 0;
                 int i0 = -1;
                 while (_socketMessageReader.GetNextMessage(ref dataFromSocket, ref timestampReadMs, ref i0))
                 {
+                    bool valid = true;
+
+                    int i6 = 0, len6 = 0;
+                    IoUtilities.NthSplit(dataFromSocket, SEPARATOR, i0, 6, ref i6, ref len6);
+                    float a = (float)IoUtilities.ParseDouble(dataFromSocket, i6, len6, ref valid);
+                    if (!valid)
+                        break;
+
+                    int i7 = 0, len7 = 0;
+                    IoUtilities.NthSplit(dataFromSocket, SEPARATOR, i0, 7, ref i7, ref len7);
+                    float b = (float)IoUtilities.ParseDouble(dataFromSocket, i7, len7, ref valid);
+                    if (!valid)
+                        break;
+
+                    int i17 = 0, len17 = 0;
+                    IoUtilities.NthSplit(dataFromSocket, SEPARATOR, i0, 17, ref i17, ref len17);
+                    float d = (float)IoUtilities.ParseDouble(dataFromSocket, i17, len17, ref valid);
+                    if (!valid)
+                        break;
+
+                    _currentAttempt.fictracAttempt = new Vector3(a, b, d);
+
                     if (logFicTracMessages)
                     {
-                        bool valid = true;
-
-                        int i6 = 0, len6 = 0;
-                        IoUtilities.NthSplit(dataFromSocket, SEPARATOR, i0, 6, ref i6, ref len6);
-                        float a = (float)IoUtilities.ParseDouble(dataFromSocket, i6, len6, ref valid);
-                        if (!valid)
-                            break;
-
-                        int i7 = 0, len7 = 0;
-                        IoUtilities.NthSplit(dataFromSocket, SEPARATOR, i0, 7, ref i7, ref len7);
-                        float b = (float)IoUtilities.ParseDouble(dataFromSocket, i7, len7, ref valid);
-                        if (!valid)
-                            break;
-
                         int i8 = 0, len8 = 0;
                         IoUtilities.NthSplit(dataFromSocket, SEPARATOR, i0, 8, ref i8, ref len8);
                         float c = (float)IoUtilities.ParseDouble(dataFromSocket, i8, len8, ref valid);
-                        if (!valid)
-                            break;
-
-                        int i17 = 0, len17 = 0;
-                        IoUtilities.NthSplit(dataFromSocket, SEPARATOR, i0, 17, ref i17, ref len17);
-                        float d = (float)IoUtilities.ParseDouble(dataFromSocket, i17, len17, ref valid);
                         if (!valid)
                             break;
 
@@ -161,6 +164,11 @@ namespace Janelia
                         Logger.Log(_currentFicTracMessageLog);
                     }
                 }
+
+                // Log the replayed world position (what is shown to the player) and the
+                // FicTrac attempted movement (what the fly is currently trying to do).
+                Logger.Log(_currentTransformation);
+                Logger.Log(_currentAttempt);
 
                 _framesSinceLogWrite++;
                 if (_framesSinceLogWrite > logWriteIntervalFrames)
