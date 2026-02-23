@@ -82,7 +82,6 @@ namespace Janelia
             _currentFicTracParametersLog.ficTracServerPort = ficTracServerPort;
             _currentFicTracParametersLog.ficTracBallRadius = ficTracBallRadius;
             _currentFicTracParametersLog.translationalGain = translationalGain;
-            Logger.Log(_currentFicTracParametersLog);
 
             _socketMessageReader = new SocketMessageReader(HEADER, ficTracServerAddress, ficTracServerPort,
                                                            ficTracBufferSize, ficTracBufferCount);
@@ -108,11 +107,27 @@ namespace Janelia
 
         public void Update()
         {
-            if (_playbackHandler.Update(ref _currentTransformation, transform))
+            bool isPlayback = _playbackHandler.Update(ref _currentTransformation, transform);
+            if (!_parametersLogged)
+            {
+                _parametersLogged = true;
+                _currentFicTracParametersLog.isReplaySession = isPlayback;
+                Logger.Log(_currentFicTracParametersLog);
+            }
+
+            if (isPlayback)
             {
                 // During playback, still consume FicTrac socket messages so the buffer
-                // does not back up.  Log the FicTrac attempted movements alongside the
-                // replayed world position that is actually shown to the player.
+                // does not back up.  Compute what the world would look like if the fly
+                // had closed-loop control, and log both the replayed positions and the
+                // attempted positions.
+                if (!_attemptInitialized)
+                {
+                    _attemptPosition = transform.position;
+                    _attemptRotationDegs = transform.eulerAngles;
+                    _attemptInitialized = true;
+                }
+
                 Byte[] dataFromSocket = null;
                 long timestampReadMs = 0;
                 int i0 = -1;
@@ -138,7 +153,17 @@ namespace Janelia
                     if (!valid)
                         break;
 
-                    _currentAttempt.fictracAttempt = new Vector3(a, b, d);
+                    // Apply the same closed-loop transforms as the primary block to compute
+                    // what the world position would be if the fly was in control.
+                    float attemptHeadingDeg = d * Mathf.Rad2Deg;
+
+                    float forward = b * ficTracBallRadius * translationalGain;
+                    float sideways = a * ficTracBallRadius * translationalGain;
+                    Vector3 localTranslation = new Vector3(forward, 0, sideways);
+
+                    Quaternion rotation = Quaternion.Euler(0, attemptHeadingDeg, 0);
+                    _attemptPosition += rotation * localTranslation;
+                    _attemptRotationDegs = new Vector3(0, attemptHeadingDeg, 0);
 
                     if (logFicTracMessages)
                     {
@@ -165,10 +190,13 @@ namespace Janelia
                     }
                 }
 
-                // Log the replayed world position (what is shown to the player) and the
-                // FicTrac attempted movement (what the fly is currently trying to do).
-                Logger.Log(_currentTransformation);
-                Logger.Log(_currentAttempt);
+                // Log the replayed world position (what the player sees) alongside the
+                // computed attempt position (what the world would look like in closed loop).
+                _currentReplayTransformation.worldPositionReplay = _currentTransformation.worldPosition;
+                _currentReplayTransformation.worldRotationDegsReplay = _currentTransformation.worldRotationDegs;
+                _currentReplayTransformation.worldPositionAttempt = _attemptPosition;
+                _currentReplayTransformation.worldRotationDegsAttempt = _attemptRotationDegs;
+                Logger.Log(_currentReplayTransformation);
 
                 _framesSinceLogWrite++;
                 if (_framesSinceLogWrite > logWriteIntervalFrames)
@@ -469,6 +497,7 @@ namespace Janelia
             public int ficTracServerPort;
             public float ficTracBallRadius;
             public float translationalGain;
+            public bool isReplaySession;
         };
         private FicTracParametersLog _currentFicTracParametersLog = new FicTracParametersLog();
 
@@ -496,6 +525,20 @@ namespace Janelia
         };
         private Attempt _currentAttempt = new Attempt();
 
+        [Serializable]
+        private class ReplayTransformation : Logger.Entry
+        {
+            public Vector3 worldPositionReplay;
+            public Vector3 worldRotationDegsReplay;
+            public Vector3 worldPositionAttempt;
+            public Vector3 worldRotationDegsAttempt;
+        };
+        private ReplayTransformation _currentReplayTransformation = new ReplayTransformation();
+
+        private Vector3 _attemptPosition;
+        private Vector3 _attemptRotationDegs;
+        private bool _attemptInitialized = false;
+        private bool _parametersLogged = false;
         private int _framesSinceLogWrite = 0;
 
         private PlaybackHandler<Transformation> _playbackHandler = new PlaybackHandler<Transformation>();
