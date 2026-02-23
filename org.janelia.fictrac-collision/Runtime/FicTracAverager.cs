@@ -4,7 +4,62 @@ using UnityEngine;
 
 namespace Janelia
 {
-     public class FicTracAverager : MonoBehaviour
+    using System;
+
+    public class CircularStatistics
+    {
+        // Function to calculate the circular mean of an array of angles in degrees
+        public static float CircularMean(float[] angles)
+        {
+            float sinSum = 0.0f;
+            float cosSum = 0.0f;
+
+            // Summing up the sine and cosine of all angles, converting from degrees to radians
+            foreach (float angle in angles)
+            {
+                // Convert angle from degrees to radians
+                float radian = angle * (float)Math.PI / 180.0f;
+                sinSum += (float)Math.Sin(radian);
+                cosSum += (float)Math.Cos(radian);
+            }
+
+            // Averaging the sine and cosine values
+            float avgSin = sinSum / angles.Length;
+            float avgCos = cosSum / angles.Length;
+
+            // Calculating the circular mean in radians
+            float circularMeanRadians = (float)Math.Atan2(avgSin, avgCos);
+
+            // Convert the circular mean from radians back to degrees
+            float circularMeanDegrees = circularMeanRadians * (180 / (float)Math.PI);
+
+            // Ensure the result is within [0, 360] degrees
+            if (circularMeanDegrees < 0)
+            {
+                circularMeanDegrees += 360;
+            }
+
+            return circularMeanDegrees;
+        }
+    }
+
+    // Example of usage:
+    class Program
+    {
+        static void Main()
+        {
+            // Example input in degrees
+            float[] angles = { 180.0f, 270.0f };
+
+            // Calculate the circular mean
+            float meanAngle = CircularStatistics.CircularMean(angles);
+
+            // Output the result
+            Console.WriteLine("Circular Mean: " + meanAngle + " degrees");
+        }
+    }
+
+    public class FicTracAverager : MonoBehaviour
     {
         public static void StartAveragingHeading(GameObject obj, int windowInFrames)
         {
@@ -71,12 +126,9 @@ namespace Janelia
                 _dirty = false;
                 return _mean;
             }
-            float sum = 0;
-            foreach (float heading in _headings)
-            {
-                sum += heading;
-            }
-            _mean = sum / _window;
+
+            _mean = CircularStatistics.CircularMean(_headings);
+            Console.WriteLine(_headings);
             StoreMeanHeading(_mean);
             _dirty = false;
             return _mean;

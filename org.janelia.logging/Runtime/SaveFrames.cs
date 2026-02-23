@@ -20,40 +20,7 @@ namespace Janelia
     {
         public static void SetFrame(int frame)
         {
-            SaveFrames saver = _object?.GetComponent<SaveFrames>();
-            if (saver != null)
-            {
-                saver.frame = frame;
-            }
-        }
-
-        public static string GetCommandLineArgs()
-        {
-            string result = "";
-            string[] args = System.Environment.GetCommandLineArgs();
-            bool includeNext = false;
-            for (int i = 0; i < args.Length; ++i)
-            {
-                if ((args[i] == "-saveFrames") || (args[i] == "-height"))
-                {
-                    result += $"{args[i]} ";
-                    includeNext = true;
-                }
-                if (args[i] == "-numbers")
-                {
-                    result += $"{args[i]} ";
-                }
-                if (includeNext)
-                {
-                    int dummy;
-                    if (int.TryParse(args[i], out dummy))
-                    {
-                        result += $"{args[i]} ";
-                    }
-                    includeNext = false;
-                }
-            }
-            return result;
+            _frame = frame;
         }
 
         [RuntimeInitializeOnLoadMethod]
@@ -131,6 +98,7 @@ namespace Janelia
 
         private static GameObject _object;
     }
+        //internal static int _frame = 0;
 
     // The class with the coroutine that will wait until the end of each frame, grab the pixels,
     // and save them.
@@ -168,13 +136,23 @@ namespace Janelia
                 SetupTextWidget();
             }
 
-            StartCoroutine(CaptureFrames());
-        }
+            public void OnDisable()
+            {
+                if (_capturing)
+                {
+                    float elapsedMsAvg = (float)_elapsedMsSum / _elapsedMsCount;
+                    Debug.Log("SaveFrames: average time to save a frame: " + elapsedMsAvg + " ms");
+                }
+                _capturing = false;
+            }
 
-        public bool IsSaving()
-        {
-            return _capturing;
-        }
+            public void LateUpdate()
+            {
+                if (_textWidget != null)
+                {
+                    _textWidget.text = _frame.ToString("D5");
+                }
+            }
 
         public void StopSaving()
         {
@@ -197,21 +175,10 @@ namespace Janelia
         {
             if (_textWidget != null)
             {
-               _textWidget.text = (time == 0) ? frame.ToString("D5") : time.ToString("F3");
-            }
-        }
-
-        private IEnumerator CaptureFrames()
-        {
-            // For the shader `org.janelia.logging/Assets/Resources/Flip.shader`
-            // the name to use when loading is just `Flip`.
-            Shader flipShader = Resources.Load("Flip", typeof(Shader)) as Shader;
-            Material flipMaterial = new Material(flipShader);
-            
-            int i = 0;
-            while (_capturing)
-            {
-                yield return new WaitForEndOfFrame();
+                // For the shader `org.janelia.logging/Assets/Resources/Flip.shader`
+                // the name to use when loading is just `Flip`.
+                Shader flipShader = Resources.Load("Flip", typeof(Shader)) as Shader;
+                Material flipMaterial = new Material(flipShader);
 
                 int width = Screen.width;
                 int height = Screen.height;
@@ -224,31 +191,36 @@ namespace Janelia
 
                 if ((frame > 0) && (i % _savingPeriod == 0))
                 {
-                    long t1 = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-
-                    // https://docs.unity3d.com/ScriptReference/RenderTexture.GetTemporary.html
-                    // "This function is optimized for when you need a quick RenderTexture to do some temporary calculations.
-                    // Internally Unity keeps a pool of temporary render textures, so a call to GetTemporary most often 
-                    // just returns an already created one."
-                    RenderTexture renderTextureNeedsFlipping = RenderTexture.GetTemporary(Screen.width, Screen.height, 24, RenderTextureFormat.BGRA32);
-                    _renderTexture = RenderTexture.GetTemporary(width, height, 24, RenderTextureFormat.BGRA32);
-
-                    // Using `ScreenCapture` and `AsyncGPUReadback` is considerably faster than `Texture2D.ReadPixels()`.
-                    _capturedFrames.Enqueue(frame);
-                    ScreenCapture.CaptureScreenshotIntoRenderTexture(renderTextureNeedsFlipping);
-                    Graphics.Blit(renderTextureNeedsFlipping, _renderTexture, flipMaterial, 0);
-                    RenderTexture.ReleaseTemporary(renderTextureNeedsFlipping);
-
-                    // Omitting a `TextureFormat` eliminates an error message like the following:
-                    // `'B8G8R8A8_SRGB' doesn't support ReadPixels usage on this platform. Async GPU readback failed.`
-                    AsyncGPUReadback.Request(_renderTexture, 0, ReadbackCompleted);
-
-                    long t2 = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-                    long elapsedMs = t2 - t1;
-                    if (elapsedMs >= 0)
+                    yield return new WaitForEndOfFrame();
+                    if ((_frame > 0) && (i % _savingPeriod == 0))
                     {
-                        _elapsedMsSum += elapsedMs;
-                        _elapsedMsCount += 1;
+                        long t1 = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+
+                        // https://docs.unity3d.com/ScriptReference/RenderTexture.GetTemporary.html
+                        // "This function is optimized for when you need a quick RenderTexture to do some temporary calculations.
+                        // Internally Unity keeps a pool of temporary render textures, so a call to GetTemporary most often 
+                        // just returns an already created one."
+                        RenderTexture renderTextureNeedsFlipping = RenderTexture.GetTemporary(Screen.width, Screen.height, 24, RenderTextureFormat.BGRA32);
+                        _renderTexture = RenderTexture.GetTemporary(width, height, 24, RenderTextureFormat.BGRA32);
+
+                        // Using `ScreenCapture` and `AsyncGPUReadback` is considerably faster than `Texture2D.ReadPixels()`.
+                        _capturedFrames.Enqueue(_frame);
+                        ScreenCapture.CaptureScreenshotIntoRenderTexture(renderTextureNeedsFlipping);
+                        Graphics.Blit(renderTextureNeedsFlipping, _renderTexture, flipMaterial, 0);
+                        RenderTexture.ReleaseTemporary(renderTextureNeedsFlipping);
+
+                        // This call seems to make `player.log` contain this messsage:
+                        // `'B8G8R8A8_SRGB' doesn't support ReadPixels usage on this platform. Async GPU readback failed.`
+                        // Yet `ReadbackCompleted()` detects no error and the data does seem to be accessible as expected.
+                        AsyncGPUReadback.Request(_renderTexture, 0, TextureFormat.BGRA32, ReadbackCompleted);
+
+                        long t2 = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+                        long elapsedMs = t2 - t1;
+                        if (elapsedMs >= 0)
+                        {
+                            _elapsedMsSum += elapsedMs;
+                            _elapsedMsCount += 1;
+                        }
                     }
                 }
                 i++;
@@ -327,12 +299,55 @@ namespace Janelia
 
             rectTransform = _textWidget.GetComponent<RectTransform>();
 
-            float insetForWidth = fontSize;
-            float width = fontSize * 100;
-            float insetForHeight = 0;
-            float height = fontSize * 2;
-            rectTransform.SetInsetAndSizeFromParentEdge(RectTransform.Edge.Left, insetForWidth, width);
-            rectTransform.SetInsetAndSizeFromParentEdge(RectTransform.Edge.Bottom, insetForHeight, height);
+                float insetForWidth = fontSize;
+                float width = fontSize * 100;
+                float insetForHeight = 0;
+                float height = fontSize * 2;
+                rectTransform.SetInsetAndSizeFromParentEdge(RectTransform.Edge.Left, insetForWidth, width);
+                rectTransform.SetInsetAndSizeFromParentEdge(RectTransform.Edge.Bottom, insetForHeight, height);
+            }
+
+            private void SaveAsFormat(byte[] imageBytes, UnityEngine.Experimental.Rendering.GraphicsFormat graphicsFormat, uint width, uint height)
+            {
+                int frameBeingSaved = (_capturedFrames.Count > 0) ? _capturedFrames.Dequeue() : 0;
+
+                if ((_format.ToLower() == "graytxt") || (_format.ToLower() == "greytxt"))
+                {
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = 0; i < imageBytes.Length; i += 4)
+                    {
+                        sb.Append($"{imageBytes[i]}");
+                        string s = ((i + 4) % (width * 4) != 0) ? " " : "\n";
+                        sb.Append(s);
+                    }
+                    string filename = frameBeingSaved.ToString("D5") + ".txt";
+                    string pathname = _outputPath + "/" + filename;
+                    File.WriteAllText(pathname, sb.ToString());
+                }
+                else if ((_format.ToLower() == "graybin") || (_format.ToLower() == "greybin"))
+                {
+                    byte[] everyFourthByte = Enumerable.Range(0, imageBytes.Length / 4).Select(i => imageBytes[i * 4]).ToArray();
+                    string filename = frameBeingSaved.ToString("D5") + ".bin";
+                    string pathname = _outputPath + "/" + filename;
+                    File.WriteAllBytes(pathname, everyFourthByte);
+                }
+                else
+                {
+                    byte[] pngBytes = ImageConversion.EncodeArrayToPNG(imageBytes, graphicsFormat, width, height);
+                    string filename = frameBeingSaved.ToString("D5") + ".png";
+                    string pathname = _outputPath + "/" + filename;
+                    File.WriteAllBytes(pathname, pngBytes);
+                }
+            }
+
+            private bool _capturing = false;
+            private Text _textWidget = null;
+            private RenderTexture _renderTexture;
+
+            Queue<int> _capturedFrames = new Queue<int>();
+
+            private long _elapsedMsSum = 0;
+            private long _elapsedMsCount = 0;
         }
 
         private void SaveAsFormat(byte[] imageBytes, UnityEngine.Experimental.Rendering.GraphicsFormat graphicsFormat, uint width, uint height)
