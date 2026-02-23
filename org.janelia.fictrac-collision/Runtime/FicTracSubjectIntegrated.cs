@@ -190,8 +190,11 @@ namespace Janelia
                             int i22 = 0, len22 = 0;
                             IoUtilities.NthSplit(dataFromSocket, SEPARATOR, i0, 22, ref i22, ref len22);
                             long timestampWriteMs = IoUtilities.ParseLong(dataFromSocket, i22, len22, ref valid);
+
+                            // Field 22 in the FicTrac message may not be as documented and so may not
+                            // be parsable. Log the rest of the message anyway.
                             if (!valid)
-                                break;
+                                timestampWriteMs = 0;
 
                             _currentFicTracMessageLog.ficTracTimestampWriteMs = timestampWriteMs;
                             _currentFicTracMessageLog.ficTracTimestampReadMs = timestampReadMs;
@@ -338,8 +341,11 @@ namespace Janelia
                     int i22 = 0, len22 = 0;
                     IoUtilities.NthSplit(dataFromSocket, SEPARATOR, i0, 22, ref i22, ref len22);
                     long timestampWriteMs = IoUtilities.ParseLong(dataFromSocket, i22, len22, ref valid);
+
+                    // Field 22 in the FicTrac message may not be as documented and so may not
+                    // be parsable. Log the rest of the message anyway.
                     if (!valid)
-                        break;
+                        timestampWriteMs = 0;
 
                     _currentFicTracMessageLog.ficTracTimestampWriteMs = timestampWriteMs;
                     _currentFicTracMessageLog.ficTracTimestampReadMs = timestampReadMs;
