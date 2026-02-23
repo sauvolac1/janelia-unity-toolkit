@@ -110,6 +110,64 @@ namespace Janelia
         {
             if (_playbackHandler.Update(ref _currentTransformation, transform))
             {
+                // During playback, still consume and log FicTrac socket messages so
+                // the buffer does not back up and so messages are captured in the log.
+                Byte[] dataFromSocket = null;
+                long timestampReadMs = 0;
+                int i0 = -1;
+                while (_socketMessageReader.GetNextMessage(ref dataFromSocket, ref timestampReadMs, ref i0))
+                {
+                    if (logFicTracMessages)
+                    {
+                        bool valid = true;
+
+                        int i6 = 0, len6 = 0;
+                        IoUtilities.NthSplit(dataFromSocket, SEPARATOR, i0, 6, ref i6, ref len6);
+                        float a = (float)IoUtilities.ParseDouble(dataFromSocket, i6, len6, ref valid);
+                        if (!valid)
+                            break;
+
+                        int i7 = 0, len7 = 0;
+                        IoUtilities.NthSplit(dataFromSocket, SEPARATOR, i0, 7, ref i7, ref len7);
+                        float b = (float)IoUtilities.ParseDouble(dataFromSocket, i7, len7, ref valid);
+                        if (!valid)
+                            break;
+
+                        int i8 = 0, len8 = 0;
+                        IoUtilities.NthSplit(dataFromSocket, SEPARATOR, i0, 8, ref i8, ref len8);
+                        float c = (float)IoUtilities.ParseDouble(dataFromSocket, i8, len8, ref valid);
+                        if (!valid)
+                            break;
+
+                        int i17 = 0, len17 = 0;
+                        IoUtilities.NthSplit(dataFromSocket, SEPARATOR, i0, 17, ref i17, ref len17);
+                        float d = (float)IoUtilities.ParseDouble(dataFromSocket, i17, len17, ref valid);
+                        if (!valid)
+                            break;
+
+                        int i22 = 0, len22 = 0;
+                        IoUtilities.NthSplit(dataFromSocket, SEPARATOR, i0, 22, ref i22, ref len22);
+                        long timestampWriteMs = IoUtilities.ParseLong(dataFromSocket, i22, len22, ref valid);
+
+                        // Field 22 in the FicTrac message may not be as documented and so may not
+                        // be parsable. Log the rest of the message anyway.
+                        if (!valid)
+                            timestampWriteMs = 0;
+
+                        _currentFicTracMessageLog.ficTracTimestampWriteMs = timestampWriteMs;
+                        _currentFicTracMessageLog.ficTracTimestampReadMs = timestampReadMs;
+                        _currentFicTracMessageLog.ficTracDeltaRotationVectorLab = new Vector3(a, b, c);
+                        _currentFicTracMessageLog.ficTracIntegratedAnimalHeadingLab = d;
+                        Logger.Log(_currentFicTracMessageLog);
+                    }
+                }
+
+                _framesSinceLogWrite++;
+                if (_framesSinceLogWrite > logWriteIntervalFrames)
+                {
+                    Logger.Write();
+                    _framesSinceLogWrite = 0;
+                }
                 return;
             }
 
