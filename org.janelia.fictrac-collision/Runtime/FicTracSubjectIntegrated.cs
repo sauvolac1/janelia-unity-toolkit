@@ -192,6 +192,7 @@ namespace Janelia
 
                 // Log the replayed world position (what the player sees) alongside the
                 // computed attempt position (what the world would look like in closed loop).
+                LogUtilities.LogDeltaTime();
                 _currentReplayTransformation.worldPositionReplay = _currentTransformation.worldPosition;
                 _currentReplayTransformation.worldRotationDegsReplay = _currentTransformation.worldRotationDegs;
                 _currentReplayTransformation.worldPositionAttempt = _attemptPosition;
